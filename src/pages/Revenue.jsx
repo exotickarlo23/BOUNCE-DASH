@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { db, BOUNCERS, INVESTMENT } from '../lib/supabase'
+import { db, BOUNCERS, BOUNCER_DISPLAY, normalizeBouncer, getInvestment } from '../lib/supabase'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { parseISO, getYear, getMonth } from 'date-fns'
 
@@ -25,20 +25,22 @@ export default function Revenue() {
   }, [])
 
   const calcPrice = (r) => (r.price || 100) * (1 - (r.discount || 0) / 100)
+  const investment = getInvestment()
 
-  // Revenue by model
+  // Revenue by model - normalize bouncer names
   const byModel = {}
   BOUNCERS.forEach(b => { byModel[b] = { count: 0, revenue: 0 } })
   reservations.forEach(r => {
-    if (!byModel[r.bouncer]) byModel[r.bouncer] = { count: 0, revenue: 0 }
-    byModel[r.bouncer].count++
-    byModel[r.bouncer].revenue += calcPrice(r)
+    const b = normalizeBouncer(r.bouncer)
+    if (!byModel[b]) byModel[b] = { count: 0, revenue: 0 }
+    byModel[b].count++
+    byModel[b].revenue += calcPrice(r)
   })
 
   const totalRevenue = reservations.reduce((sum, r) => sum + calcPrice(r), 0)
   const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0)
 
-  // Monthly data
+  // Monthly data - normalize bouncer names
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
     const monthRes = reservations.filter(r => {
       const d = parseISO(r.date)
@@ -47,8 +49,9 @@ export default function Revenue() {
     const byBouncer = {}
     BOUNCERS.forEach(b => { byBouncer[b] = 0 })
     monthRes.forEach(r => {
-      if (!byBouncer[r.bouncer]) byBouncer[r.bouncer] = 0
-      byBouncer[r.bouncer] += calcPrice(r)
+      const b = normalizeBouncer(r.bouncer)
+      if (byBouncer[b] === undefined) byBouncer[b] = 0
+      byBouncer[b] += calcPrice(r)
     })
     return { byBouncer, total: monthRes.reduce((sum, r) => sum + calcPrice(r), 0), count: monthRes.length }
   })
@@ -71,7 +74,7 @@ export default function Revenue() {
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
                     <div className={`w-3 h-3 rounded-full ${colors.bg}`} />
-                    <span className="text-sm font-medium capitalize text-brand-dark">{b}</span>
+                    <span className="text-sm font-medium text-brand-dark">{BOUNCER_DISPLAY[b]}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-sm font-bold text-brand-dark">{data.revenue.toLocaleString()}€</span>
@@ -97,7 +100,7 @@ export default function Revenue() {
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="bg-brand-teal-light rounded-xl p-3">
             <p className="text-xs text-gray-500">Uloženo</p>
-            <p className="font-bold text-brand-dark">{INVESTMENT.toLocaleString()}€</p>
+            <p className="font-bold text-brand-dark">{investment.toLocaleString()}€</p>
           </div>
           <div className="bg-green-50 rounded-xl p-3">
             <p className="text-xs text-gray-500">Prihod</p>
@@ -112,7 +115,7 @@ export default function Revenue() {
         </div>
       </div>
 
-      {/* Monthly */}
+      {/* Monthly - fixed bar: total width = month total / max month total */}
       <div className="bg-white rounded-2xl p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-brand-dark">Po mjesecima</h3>
@@ -128,27 +131,32 @@ export default function Revenue() {
         </div>
 
         <div className="space-y-2">
-          {monthlyData.map((m, i) => (
-            <div key={i} className={`${m.total === 0 ? 'opacity-40' : ''}`}>
-              <div className="flex items-center justify-between text-xs mb-0.5">
-                <span className="text-gray-500 w-10">{MONTH_NAMES[i]}</span>
-                <span className="font-medium text-brand-dark">{m.total > 0 ? `${m.total.toLocaleString()}€` : '-'}</span>
+          {monthlyData.map((m, i) => {
+            const totalWidth = maxMonthly > 0 ? (m.total / maxMonthly * 100) : 0
+            return (
+              <div key={i} className={`${m.total === 0 ? 'opacity-40' : ''}`}>
+                <div className="flex items-center justify-between text-xs mb-0.5">
+                  <span className="text-gray-500 w-10">{MONTH_NAMES[i]}</span>
+                  <span className="font-medium text-brand-dark">{m.total > 0 ? `${m.total.toLocaleString()}€` : '-'}</span>
+                </div>
+                <div className="h-4 bg-gray-50 rounded-full overflow-hidden">
+                  <div className="flex h-full" style={{ width: `${totalWidth}%` }}>
+                    {BOUNCERS.map(b => {
+                      const segPct = m.total > 0 ? (m.byBouncer[b] / m.total * 100) : 0
+                      if (segPct === 0) return null
+                      return (
+                        <div
+                          key={b}
+                          className={`${BOUNCER_COLORS[b].bg} transition-all duration-700 first:rounded-l-full last:rounded-r-full`}
+                          style={{ width: `${segPct}%` }}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
-              <div className="flex h-4 bg-gray-50 rounded-full overflow-hidden">
-                {BOUNCERS.map(b => {
-                  const w = maxMonthly > 0 ? (m.byBouncer[b] / maxMonthly * 100) : 0
-                  if (w === 0) return null
-                  return (
-                    <div
-                      key={b}
-                      className={`${BOUNCER_COLORS[b].bg} transition-all duration-700 first:rounded-l-full last:rounded-r-full`}
-                      style={{ width: `${w}%` }}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="mt-3 pt-3 border-t border-gray-100 flex justify-between">
