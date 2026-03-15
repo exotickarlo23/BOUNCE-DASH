@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
-import { db, INVESTMENT } from '../lib/supabase'
-import { TrendingUp, CalendarDays, Euro, Target, ArrowUpRight, ArrowDownRight, Receipt } from 'lucide-react'
+import { db, getInvestment, setInvestment as saveInvestment, normalizeBouncer, BOUNCER_DISPLAY } from '../lib/supabase'
+import { TrendingUp, CalendarDays, Euro, Target, ArrowUpRight, ArrowDownRight, Receipt, Pencil, Check, X } from 'lucide-react'
 import { format, startOfMonth, endOfMonth, parseISO, isWithinInterval } from 'date-fns'
 import { hr } from 'date-fns/locale'
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
+  const [investment, setInvestmentState] = useState(getInvestment())
+  const [editingInvestment, setEditingInvestment] = useState(false)
+  const [investmentInput, setInvestmentInput] = useState('')
 
   const calcPrice = (r) => (r.price || 100) * (1 - (r.discount || 0) / 100)
 
@@ -43,19 +46,22 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadStats()
-    const handleStorage = (e) => {
-      if (e.key?.startsWith('hophop_')) loadStats()
+    const handleFocus = () => {
+      loadStats()
+      setInvestmentState(getInvestment())
     }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [loadStats])
-
-  // Re-load when tab becomes visible (in case data changed on this tab)
-  useEffect(() => {
-    const handleFocus = () => loadStats()
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
   }, [loadStats])
+
+  function handleSaveInvestment() {
+    const val = parseFloat(investmentInput)
+    if (val > 0) {
+      saveInvestment(val)
+      setInvestmentState(val)
+    }
+    setEditingInvestment(false)
+  }
 
   if (!stats) {
     return (
@@ -69,14 +75,41 @@ export default function Dashboard() {
   }
 
   const roi = stats.totalRevenue - stats.totalExpenses
-  const roiPercent = INVESTMENT > 0 ? ((roi / INVESTMENT) * 100).toFixed(1) : 0
+  const roiPercent = investment > 0 ? ((roi / investment) * 100).toFixed(1) : 0
 
   return (
     <div className="space-y-4">
       {/* ROI Card */}
       <div className="bg-gradient-to-br from-brand-teal to-teal-600 rounded-2xl p-5 text-white">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm opacity-80">ROI (uloženo: {INVESTMENT.toLocaleString()}€)</span>
+          {editingInvestment ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm opacity-80">Uloženo:</span>
+              <input
+                type="number"
+                value={investmentInput}
+                onChange={(e) => setInvestmentInput(e.target.value)}
+                className="w-24 px-2 py-1 rounded-lg text-sm text-brand-dark bg-white"
+                autoFocus
+                inputMode="decimal"
+              />
+              <span className="text-sm">€</span>
+              <button onClick={handleSaveInvestment} className="p-1 bg-white/20 rounded-lg">
+                <Check className="w-4 h-4" />
+              </button>
+              <button onClick={() => setEditingInvestment(false)} className="p-1 bg-white/20 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setInvestmentInput(String(investment)); setEditingInvestment(true) }}
+              className="flex items-center gap-1 text-sm opacity-80 hover:opacity-100 transition"
+            >
+              ROI (uloženo: {investment.toLocaleString()}€)
+              <Pencil className="w-3 h-3" />
+            </button>
+          )}
           <Target className="w-5 h-5 opacity-80" />
         </div>
         <div className="text-3xl font-bold">{roiPercent}%</div>
@@ -130,7 +163,7 @@ export default function Dashboard() {
               <div key={r.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                 <div>
                   <p className="font-medium text-sm text-brand-dark">{r.name}</p>
-                  <p className="text-xs text-gray-400 capitalize">{r.bouncer}</p>
+                  <p className="text-xs text-gray-400">{BOUNCER_DISPLAY[normalizeBouncer(r.bouncer)] || r.bouncer}</p>
                 </div>
                 <span className="text-sm font-medium text-brand-teal">
                   {format(parseISO(r.date), 'd. MMM', { locale: hr })}

@@ -1,8 +1,39 @@
 // Constants
-export const INVESTMENT = 5050
 export const DEFAULT_PRICE = 100
 export const BOUNCERS = ['minecraft', 'dinosaur', 'unicorn']
 export const EXPENSE_CATEGORIES = ['gorivo', 'marketing', 'amortizacija', 'garaža']
+
+export const BOUNCER_DISPLAY = {
+  minecraft: 'Minecraft',
+  dinosaur: 'Dinosaur',
+  unicorn: 'Jednorog',
+}
+
+// Map Croatian/alternate names to internal keys
+const BOUNCER_ALIASES = {
+  minecraft: 'minecraft',
+  dinosaur: 'dinosaur',
+  dinosaurus: 'dinosaur',
+  dino: 'dinosaur',
+  unicorn: 'unicorn',
+  jednorog: 'unicorn',
+}
+
+export function normalizeBouncer(name) {
+  if (!name) return 'minecraft'
+  const key = name.trim().toLowerCase()
+  return BOUNCER_ALIASES[key] || key
+}
+
+// Investment - editable, stored in localStorage
+export function getInvestment() {
+  const stored = localStorage.getItem('hophop_investment')
+  return stored ? parseFloat(stored) : 5050
+}
+
+export function setInvestment(amount) {
+  localStorage.setItem('hophop_investment', String(amount))
+}
 
 // LocalStorage-based database
 function getStore(key) {
@@ -28,6 +59,10 @@ export const db = {
       all.push(item)
       setStore('hophop_reservations', all)
       return item
+    },
+    update(id, updates) {
+      const all = this.getAll().map(r => r.id === id ? { ...r, ...updates } : r)
+      setStore('hophop_reservations', all)
     },
     delete(id) {
       const all = this.getAll().filter(r => r.id !== id)

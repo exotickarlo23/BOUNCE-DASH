@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { db, BOUNCERS, DEFAULT_PRICE } from '../lib/supabase'
+import { db, BOUNCERS, DEFAULT_PRICE, BOUNCER_DISPLAY, normalizeBouncer } from '../lib/supabase'
 import { parseReservationText } from '../lib/parseReservation'
-import { Plus, ClipboardPaste, ChevronLeft, ChevronRight, X, Trash2, Phone } from 'lucide-react'
+import { Plus, ClipboardPaste, ChevronLeft, ChevronRight, X, Trash2, Phone, MapPin, Pencil } from 'lucide-react'
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addMonths, subMonths, eachDayOfInterval, isSameMonth, isSameDay, isToday,
@@ -16,16 +16,19 @@ const BOUNCER_COLORS = {
   unicorn: 'bg-purple-100 text-purple-700 border-purple-300',
 }
 
+const emptyForm = {
+  name: '', email: '', phone: '', bouncer: 'minecraft', date: '', discount: 0, price: DEFAULT_PRICE, address: ''
+}
+
 export default function Reservations() {
   const [reservations, setReservations] = useState([])
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [showAdd, setShowAdd] = useState(false)
   const [showPaste, setShowPaste] = useState(false)
   const [selectedDay, setSelectedDay] = useState(null)
+  const [editingId, setEditingId] = useState(null)
 
-  const [form, setForm] = useState({
-    name: '', email: '', phone: '', bouncer: 'minecraft', date: '', discount: 0, price: DEFAULT_PRICE
-  })
+  const [form, setForm] = useState({ ...emptyForm })
   const [pasteText, setPasteText] = useState('')
 
   const load = useCallback(() => {
@@ -36,18 +39,40 @@ export default function Reservations() {
 
   function handleSave() {
     if (!form.name || !form.date || !form.bouncer) return
-    db.reservations.add({
+    const data = {
       name: form.name,
       email: form.email,
       phone: form.phone,
-      bouncer: form.bouncer,
+      bouncer: normalizeBouncer(form.bouncer),
       date: form.date,
       discount: parseFloat(form.discount) || 0,
       price: parseFloat(form.price) || DEFAULT_PRICE,
-    })
-    setForm({ name: '', email: '', phone: '', bouncer: 'minecraft', date: '', discount: 0, price: DEFAULT_PRICE })
+      address: form.address,
+    }
+    if (editingId) {
+      db.reservations.update(editingId, data)
+    } else {
+      db.reservations.add(data)
+    }
+    setForm({ ...emptyForm })
     setShowAdd(false)
+    setEditingId(null)
     load()
+  }
+
+  function handleEdit(r) {
+    setForm({
+      name: r.name || '',
+      email: r.email || '',
+      phone: r.phone || '',
+      bouncer: r.bouncer || 'minecraft',
+      date: r.date || '',
+      discount: r.discount || 0,
+      price: r.price || DEFAULT_PRICE,
+      address: r.address || '',
+    })
+    setEditingId(r.id)
+    setShowAdd(true)
   }
 
   function handleDelete(id) {
@@ -66,10 +91,18 @@ export default function Reservations() {
       date: parsed.date || '',
       discount: 0,
       price: DEFAULT_PRICE,
+      address: parsed.address || '',
     })
     setPasteText('')
     setShowPaste(false)
+    setEditingId(null)
     setShowAdd(true)
+  }
+
+  function closeModal() {
+    setShowAdd(false)
+    setEditingId(null)
+    setForm({ ...emptyForm })
   }
 
   // Calendar
@@ -96,7 +129,7 @@ export default function Reservations() {
           Zalijepi
         </button>
         <button
-          onClick={() => { setForm(f => ({ ...f, date: format(new Date(), 'yyyy-MM-dd') })); setShowAdd(true) }}
+          onClick={() => { setForm({ ...emptyForm, date: format(new Date(), 'yyyy-MM-dd') }); setEditingId(null); setShowAdd(true) }}
           className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-orange text-white rounded-xl font-medium shadow-sm active:scale-95 transition"
         >
           <Plus className="w-4 h-4" />
@@ -163,9 +196,14 @@ export default function Reservations() {
         </div>
 
         <div className="flex justify-center gap-4 mt-3 text-xs text-gray-500">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Minecraft</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Dinosaur</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> Unicorn</span>
+          {BOUNCERS.map(b => (
+            <span key={b} className="flex items-center gap-1">
+              <span className={`w-2 h-2 rounded-full ${
+                b === 'minecraft' ? 'bg-green-500' : b === 'dinosaur' ? 'bg-orange-500' : 'bg-purple-500'
+              }`} />
+              {BOUNCER_DISPLAY[b]}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -180,7 +218,7 @@ export default function Reservations() {
           ) : (
             <div className="space-y-2">
               {dayReservations.map((r) => (
-                <ReservationCard key={r.id} reservation={r} onDelete={handleDelete} />
+                <ReservationCard key={r.id} reservation={r} onDelete={handleDelete} onEdit={handleEdit} />
               ))}
             </div>
           )}
@@ -197,7 +235,7 @@ export default function Reservations() {
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {reservations.map((r) => (
-              <ReservationCard key={r.id} reservation={r} onDelete={handleDelete} />
+              <ReservationCard key={r.id} reservation={r} onDelete={handleDelete} onEdit={handleEdit} />
             ))}
           </div>
         )}
@@ -209,7 +247,7 @@ export default function Reservations() {
           <textarea
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
-            placeholder={`Zalijepi tekst potvrde ovdje, npr:\n\nIme i prezime: Marko Špoljar\nEmail: marko@gmail.com\nTelefon: 091 339 0426\nNapuhanac: minecraft\nDatum: 2026-04-18`}
+            placeholder={`Zalijepi tekst potvrde ovdje, npr:\n\nIme i prezime: Marko Špoljar\nEmail: marko@gmail.com\nTelefon: 091 339 0426\nNapuhanac: minecraft\nDatum: 2026-04-18\nAdresa: Ilica 25, Zagreb`}
             className="w-full h-40 p-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-brand-teal"
             autoFocus
           />
@@ -223,9 +261,9 @@ export default function Reservations() {
         </Modal>
       )}
 
-      {/* Add Modal */}
+      {/* Add/Edit Modal */}
       {showAdd && (
-        <Modal onClose={() => setShowAdd(false)} title="Nova rezervacija">
+        <Modal onClose={closeModal} title={editingId ? 'Uredi rezervaciju' : 'Nova rezervacija'}>
           <div className="space-y-3">
             <input
               type="text" placeholder="Ime i prezime *" value={form.name}
@@ -242,13 +280,18 @@ export default function Reservations() {
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
             />
+            <input
+              type="text" placeholder="Adresa dostave" value={form.address}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
+            />
             <select
               value={form.bouncer}
               onChange={(e) => setForm({ ...form, bouncer: e.target.value })}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white"
             >
               {BOUNCERS.map((b) => (
-                <option key={b} value={b}>{b.charAt(0).toUpperCase() + b.slice(1)}</option>
+                <option key={b} value={b}>{BOUNCER_DISPLAY[b]}</option>
               ))}
             </select>
             <input
@@ -284,7 +327,7 @@ export default function Reservations() {
               disabled={!form.name || !form.date}
               className="w-full py-3 bg-brand-orange text-white font-semibold rounded-xl disabled:opacity-50 active:scale-95 transition"
             >
-              Spremi rezervaciju
+              {editingId ? 'Spremi promjene' : 'Spremi rezervaciju'}
             </button>
           </div>
         </Modal>
@@ -293,36 +336,46 @@ export default function Reservations() {
   )
 }
 
-function ReservationCard({ reservation: r, onDelete }) {
-  const colorClass = BOUNCER_COLORS[r.bouncer] || 'bg-gray-100 text-gray-700 border-gray-300'
+function ReservationCard({ reservation: r, onDelete, onEdit }) {
+  const bouncer = normalizeBouncer(r.bouncer)
+  const colorClass = BOUNCER_COLORS[bouncer] || 'bg-gray-100 text-gray-700 border-gray-300'
   const finalPrice = (r.price || 100) * (1 - (r.discount || 0) / 100)
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-medium text-sm text-brand-dark truncate">{r.name}</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full border capitalize ${colorClass}`}>
-            {r.bouncer}
-          </span>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-gray-400">
-          <span>{format(parseISO(r.date), 'd.M.yyyy')}</span>
-          <span className="font-medium text-brand-dark">{finalPrice}€</span>
-          {r.discount > 0 && <span className="text-brand-teal">-{r.discount}%</span>}
-        </div>
-        {r.phone && (
-          <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
-            <Phone className="w-3 h-3" />{r.phone}
+    <div className="p-3 rounded-xl bg-gray-50">
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0" onClick={() => onEdit(r)} role="button">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-medium text-sm text-brand-dark truncate">{r.name}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full border capitalize ${colorClass}`}>
+              {BOUNCER_DISPLAY[bouncer] || r.bouncer}
+            </span>
           </div>
-        )}
+          <div className="flex items-center gap-3 text-xs text-gray-400">
+            <span>{format(parseISO(r.date), 'd.M.yyyy')}</span>
+            <span className="font-medium text-brand-dark">{finalPrice}€</span>
+            {r.discount > 0 && <span className="text-brand-teal">-{r.discount}%</span>}
+          </div>
+          {r.phone && (
+            <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+              <Phone className="w-3 h-3" />{r.phone}
+            </div>
+          )}
+          {r.address && (
+            <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+              <MapPin className="w-3 h-3" />{r.address}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col gap-1">
+          <button onClick={() => onEdit(r)} className="p-2 text-gray-300 active:text-brand-teal transition">
+            <Pencil className="w-4 h-4" />
+          </button>
+          <button onClick={() => onDelete(r.id)} className="p-2 text-gray-300 active:text-red-500 transition">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
-      <button
-        onClick={() => onDelete(r.id)}
-        className="p-2 text-gray-300 active:text-red-500 transition"
-      >
-        <Trash2 className="w-4 h-4" />
-      </button>
     </div>
   )
 }
