@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
-import { supabase, EXPENSE_CATEGORIES } from '../lib/supabase'
+import { useState, useEffect, useCallback } from 'react'
+import { db, EXPENSE_CATEGORIES } from '../lib/supabase'
 import { Plus, Trash2, X, Fuel, Megaphone, Wrench, Warehouse } from 'lucide-react'
-import { format, parseISO, getMonth, getYear } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 
 const CATEGORY_CONFIG = {
   gorivo: { icon: Fuel, color: 'bg-blue-100 text-blue-600' },
@@ -13,42 +13,36 @@ const CATEGORY_CONFIG = {
 export default function Expenses() {
   const [expenses, setExpenses] = useState([])
   const [showAdd, setShowAdd] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [form, setForm] = useState({
     category: 'gorivo', amount: '', description: '', date: format(new Date(), 'yyyy-MM-dd')
   })
-  const [saving, setSaving] = useState(false)
   const [filter, setFilter] = useState('all')
 
-  useEffect(() => { fetchExpenses() }, [])
+  const load = useCallback(() => {
+    const all = db.expenses.getAll()
+    all.sort((a, b) => b.date.localeCompare(a.date))
+    setExpenses(all)
+  }, [])
 
-  async function fetchExpenses() {
-    const { data } = await supabase.from('expenses').select('*').order('date', { ascending: false })
-    setExpenses(data || [])
-    setLoading(false)
-  }
+  useEffect(() => { load() }, [load])
 
-  async function handleSave() {
+  function handleSave() {
     if (!form.amount || !form.category) return
-    setSaving(true)
-    const { error } = await supabase.from('expenses').insert([{
+    db.expenses.add({
       category: form.category,
       amount: parseFloat(form.amount),
       description: form.description,
       date: form.date,
-    }])
-    if (!error) {
-      setForm({ category: 'gorivo', amount: '', description: '', date: format(new Date(), 'yyyy-MM-dd') })
-      setShowAdd(false)
-      fetchExpenses()
-    }
-    setSaving(false)
+    })
+    setForm({ category: 'gorivo', amount: '', description: '', date: format(new Date(), 'yyyy-MM-dd') })
+    setShowAdd(false)
+    load()
   }
 
-  async function handleDelete(id) {
+  function handleDelete(id) {
     if (!confirm('Obrisati trošak?')) return
-    await supabase.from('expenses').delete().eq('id', id)
-    fetchExpenses()
+    db.expenses.delete(id)
+    load()
   }
 
   // Category totals
@@ -62,16 +56,11 @@ export default function Expenses() {
 
   const filtered = filter === 'all' ? expenses : expenses.filter(e => e.category === filter)
 
-  if (loading) {
-    return <div className="space-y-4 animate-pulse">{[1,2,3].map(i => <div key={i} className="h-20 bg-gray-200 rounded-2xl" />)}</div>
-  }
-
   return (
     <div className="space-y-4">
-      {/* Add button */}
       <button
         onClick={() => setShowAdd(true)}
-        className="w-full flex items-center justify-center gap-2 py-3 bg-brand-orange text-white rounded-xl font-medium shadow-sm hover:opacity-90 transition"
+        className="w-full flex items-center justify-center gap-2 py-3 bg-brand-orange text-white rounded-xl font-medium shadow-sm active:scale-95 transition"
       >
         <Plus className="w-4 h-4" />
         Dodaj trošak
@@ -90,7 +79,7 @@ export default function Expenses() {
                 key={cat}
                 onClick={() => setFilter(filter === cat ? 'all' : cat)}
                 className={`p-3 rounded-xl text-left transition ${
-                  filter === cat ? 'ring-2 ring-brand-teal bg-brand-teal-light' : 'bg-gray-50 hover:bg-gray-100'
+                  filter === cat ? 'ring-2 ring-brand-teal bg-brand-teal-light' : 'bg-gray-50 active:bg-gray-100'
                 }`}
               >
                 <div className={`w-8 h-8 ${config.color} rounded-lg flex items-center justify-center mb-2`}>
@@ -128,7 +117,7 @@ export default function Expenses() {
               const config = CATEGORY_CONFIG[e.category] || CATEGORY_CONFIG.gorivo
               const Icon = config.icon
               return (
-                <div key={e.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 group">
+                <div key={e.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
                   <div className={`w-10 h-10 ${config.color} rounded-xl flex items-center justify-center flex-shrink-0`}>
                     <Icon className="w-5 h-5" />
                   </div>
@@ -143,7 +132,7 @@ export default function Expenses() {
                   <span className="font-bold text-sm text-red-500 flex-shrink-0">-{e.amount}€</span>
                   <button
                     onClick={() => handleDelete(e.id)}
-                    className="p-1 text-gray-300 hover:text-red-500 transition opacity-0 group-hover:opacity-100"
+                    className="p-1 text-gray-300 active:text-red-500 transition"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -160,7 +149,7 @@ export default function Expenses() {
           <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-brand-dark text-lg">Novi trošak</h3>
-              <button onClick={() => setShowAdd(false)} className="p-1 hover:bg-gray-100 rounded-lg">
+              <button onClick={() => setShowAdd(false)} className="p-1 active:bg-gray-100 rounded-lg">
                 <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
@@ -192,7 +181,7 @@ export default function Expenses() {
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Iznos (€) *</label>
                 <input
-                  type="number" placeholder="0" value={form.amount}
+                  type="number" placeholder="0" value={form.amount} inputMode="decimal"
                   onChange={(e) => setForm({ ...form, amount: e.target.value })}
                   className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
                 />
@@ -215,10 +204,10 @@ export default function Expenses() {
               </div>
               <button
                 onClick={handleSave}
-                disabled={saving || !form.amount}
-                className="w-full py-3 bg-brand-orange text-white font-semibold rounded-xl disabled:opacity-50 transition"
+                disabled={!form.amount}
+                className="w-full py-3 bg-brand-orange text-white font-semibold rounded-xl disabled:opacity-50 active:scale-95 transition"
               >
-                {saving ? 'Spremanje...' : 'Spremi trošak'}
+                Spremi trošak
               </button>
             </div>
           </div>

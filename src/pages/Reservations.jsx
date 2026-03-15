@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
-import { supabase, BOUNCERS, DEFAULT_PRICE } from '../lib/supabase'
+import { useState, useEffect, useCallback } from 'react'
+import { db, BOUNCERS, DEFAULT_PRICE } from '../lib/supabase'
 import { parseReservationText } from '../lib/parseReservation'
-import { Plus, ClipboardPaste, ChevronLeft, ChevronRight, X, Trash2, Phone, Mail } from 'lucide-react'
+import { Plus, ClipboardPaste, ChevronLeft, ChevronRight, X, Trash2, Phone } from 'lucide-react'
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addMonths, subMonths, eachDayOfInterval, isSameMonth, isSameDay, isToday,
@@ -22,27 +22,21 @@ export default function Reservations() {
   const [showAdd, setShowAdd] = useState(false)
   const [showPaste, setShowPaste] = useState(false)
   const [selectedDay, setSelectedDay] = useState(null)
-  const [loading, setLoading] = useState(true)
 
-  // Form state
   const [form, setForm] = useState({
     name: '', email: '', phone: '', bouncer: 'minecraft', date: '', discount: 0, price: DEFAULT_PRICE
   })
   const [pasteText, setPasteText] = useState('')
-  const [saving, setSaving] = useState(false)
 
-  useEffect(() => { fetchReservations() }, [])
+  const load = useCallback(() => {
+    setReservations(db.reservations.getAll().sort((a, b) => a.date.localeCompare(b.date)))
+  }, [])
 
-  async function fetchReservations() {
-    const { data } = await supabase.from('reservations').select('*').order('date', { ascending: true })
-    setReservations(data || [])
-    setLoading(false)
-  }
+  useEffect(() => { load() }, [load])
 
-  async function handleSave() {
+  function handleSave() {
     if (!form.name || !form.date || !form.bouncer) return
-    setSaving(true)
-    const { error } = await supabase.from('reservations').insert([{
+    db.reservations.add({
       name: form.name,
       email: form.email,
       phone: form.phone,
@@ -50,20 +44,16 @@ export default function Reservations() {
       date: form.date,
       discount: parseFloat(form.discount) || 0,
       price: parseFloat(form.price) || DEFAULT_PRICE,
-    }])
-    if (!error) {
-      setForm({ name: '', email: '', phone: '', bouncer: 'minecraft', date: '', discount: 0, price: DEFAULT_PRICE })
-      setShowAdd(false)
-      setShowPaste(false)
-      fetchReservations()
-    }
-    setSaving(false)
+    })
+    setForm({ name: '', email: '', phone: '', bouncer: 'minecraft', date: '', discount: 0, price: DEFAULT_PRICE })
+    setShowAdd(false)
+    load()
   }
 
-  async function handleDelete(id) {
+  function handleDelete(id) {
     if (!confirm('Obrisati rezervaciju?')) return
-    await supabase.from('reservations').delete().eq('id', id)
-    fetchReservations()
+    db.reservations.delete(id)
+    load()
   }
 
   function handlePaste() {
@@ -77,11 +67,12 @@ export default function Reservations() {
       discount: 0,
       price: DEFAULT_PRICE,
     })
+    setPasteText('')
     setShowPaste(false)
     setShowAdd(true)
   }
 
-  // Calendar logic
+  // Calendar
   const monthStart = startOfMonth(currentMonth)
   const monthEnd = endOfMonth(currentMonth)
   const calStart = startOfWeek(monthStart, { weekStartsOn: 1 })
@@ -98,15 +89,15 @@ export default function Reservations() {
       {/* Action buttons */}
       <div className="flex gap-2">
         <button
-          onClick={() => setShowPaste(true)}
-          className="flex-1 flex items-center justify-center gap-2 py-3 bg-white rounded-xl text-brand-dark font-medium shadow-sm hover:shadow transition"
+          onClick={() => { setPasteText(''); setShowPaste(true) }}
+          className="flex-1 flex items-center justify-center gap-2 py-3 bg-white rounded-xl text-brand-dark font-medium shadow-sm active:scale-95 transition"
         >
           <ClipboardPaste className="w-4 h-4 text-brand-teal" />
-          Zalijepi rezervaciju
+          Zalijepi
         </button>
         <button
-          onClick={() => { setShowAdd(true); setForm(f => ({ ...f, date: format(new Date(), 'yyyy-MM-dd') })) }}
-          className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-orange text-white rounded-xl font-medium shadow-sm hover:opacity-90 transition"
+          onClick={() => { setForm(f => ({ ...f, date: format(new Date(), 'yyyy-MM-dd') })); setShowAdd(true) }}
+          className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-orange text-white rounded-xl font-medium shadow-sm active:scale-95 transition"
         >
           <Plus className="w-4 h-4" />
           Nova ručno
@@ -116,30 +107,28 @@ export default function Reservations() {
       {/* Calendar */}
       <div className="bg-white rounded-2xl p-4">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-lg">
+          <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 active:bg-gray-100 rounded-lg">
             <ChevronLeft className="w-5 h-5 text-gray-600" />
           </button>
           <h3 className="font-semibold text-brand-dark capitalize">
             {format(currentMonth, 'LLLL yyyy', { locale: hr })}
           </h3>
-          <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-lg">
+          <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 active:bg-gray-100 rounded-lg">
             <ChevronRight className="w-5 h-5 text-gray-600" />
           </button>
         </div>
 
-        {/* Day headers */}
         <div className="grid grid-cols-7 gap-1 mb-1">
           {DAY_NAMES.map((d) => (
             <div key={d} className="text-center text-xs font-medium text-gray-400 py-1">{d}</div>
           ))}
         </div>
 
-        {/* Calendar grid */}
         <div className="grid grid-cols-7 gap-1">
           {days.map((day) => {
             const dayRes = getReservationsForDay(day)
             const inMonth = isSameMonth(day, currentMonth)
-            const today = isToday(day)
+            const todayFlag = isToday(day)
             const selected = selectedDay && isSameDay(day, selectedDay)
 
             return (
@@ -148,11 +137,11 @@ export default function Reservations() {
                 onClick={() => setSelectedDay(selected ? null : day)}
                 className={`relative p-1 rounded-lg text-sm min-h-[44px] flex flex-col items-center justify-start transition
                   ${!inMonth ? 'text-gray-300' : 'text-brand-dark'}
-                  ${today ? 'ring-2 ring-brand-teal' : ''}
-                  ${selected ? 'bg-brand-teal-light' : 'hover:bg-gray-50'}
+                  ${todayFlag ? 'ring-2 ring-brand-teal' : ''}
+                  ${selected ? 'bg-brand-teal-light' : 'active:bg-gray-50'}
                 `}
               >
-                <span className={`text-xs ${today ? 'font-bold text-brand-teal' : ''}`}>
+                <span className={`text-xs ${todayFlag ? 'font-bold text-brand-teal' : ''}`}>
                   {format(day, 'd')}
                 </span>
                 {dayRes.length > 0 && (
@@ -173,7 +162,6 @@ export default function Reservations() {
           })}
         </div>
 
-        {/* Legend */}
         <div className="flex justify-center gap-4 mt-3 text-xs text-gray-500">
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Minecraft</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Dinosaur</span>
@@ -181,7 +169,7 @@ export default function Reservations() {
         </div>
       </div>
 
-      {/* Selected day reservations */}
+      {/* Selected day */}
       {selectedDay && (
         <div className="bg-white rounded-2xl p-4">
           <h3 className="font-semibold text-brand-dark mb-3">
@@ -199,16 +187,12 @@ export default function Reservations() {
         </div>
       )}
 
-      {/* All reservations list */}
+      {/* All reservations */}
       <div className="bg-white rounded-2xl p-4">
         <h3 className="font-semibold text-brand-dark mb-3">
           Sve rezervacije ({reservations.length})
         </h3>
-        {loading ? (
-          <div className="space-y-2 animate-pulse">
-            {[1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl" />)}
-          </div>
-        ) : reservations.length === 0 ? (
+        {reservations.length === 0 ? (
           <p className="text-gray-400 text-sm text-center py-4">Nema još rezervacija.</p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -227,11 +211,12 @@ export default function Reservations() {
             onChange={(e) => setPasteText(e.target.value)}
             placeholder={`Zalijepi tekst potvrde ovdje, npr:\n\nIme i prezime: Marko Špoljar\nEmail: marko@gmail.com\nTelefon: 091 339 0426\nNapuhanac: minecraft\nDatum: 2026-04-18`}
             className="w-full h-40 p-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-brand-teal"
+            autoFocus
           />
           <button
             onClick={handlePaste}
             disabled={!pasteText.trim()}
-            className="w-full mt-3 py-3 bg-brand-teal text-white font-semibold rounded-xl disabled:opacity-50 transition"
+            className="w-full mt-3 py-3 bg-brand-teal text-white font-semibold rounded-xl disabled:opacity-50 active:scale-95 transition"
           >
             Parsiraj i popuni
           </button>
@@ -296,10 +281,10 @@ export default function Reservations() {
             )}
             <button
               onClick={handleSave}
-              disabled={saving || !form.name || !form.date}
-              className="w-full py-3 bg-brand-orange text-white font-semibold rounded-xl disabled:opacity-50 transition"
+              disabled={!form.name || !form.date}
+              className="w-full py-3 bg-brand-orange text-white font-semibold rounded-xl disabled:opacity-50 active:scale-95 transition"
             >
-              {saving ? 'Spremanje...' : 'Spremi rezervaciju'}
+              Spremi rezervaciju
             </button>
           </div>
         </Modal>
@@ -313,7 +298,7 @@ function ReservationCard({ reservation: r, onDelete }) {
   const finalPrice = (r.price || 100) * (1 - (r.discount || 0) / 100)
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 group">
+    <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="font-medium text-sm text-brand-dark truncate">{r.name}</span>
@@ -334,7 +319,7 @@ function ReservationCard({ reservation: r, onDelete }) {
       </div>
       <button
         onClick={() => onDelete(r.id)}
-        className="p-2 text-gray-300 hover:text-red-500 transition opacity-0 group-hover:opacity-100"
+        className="p-2 text-gray-300 active:text-red-500 transition"
       >
         <Trash2 className="w-4 h-4" />
       </button>
@@ -351,7 +336,7 @@ function Modal({ onClose, title, children }) {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-brand-dark text-lg">{title}</h3>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
+          <button onClick={onClose} className="p-1 active:bg-gray-100 rounded-lg">
             <X className="w-5 h-5 text-gray-400" />
           </button>
         </div>

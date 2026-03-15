@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
-import { supabase, BOUNCERS, INVESTMENT } from '../lib/supabase'
-import { TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react'
-import { format, parseISO, getYear, getMonth } from 'date-fns'
-import { hr } from 'date-fns/locale'
+import { db, BOUNCERS, INVESTMENT } from '../lib/supabase'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { parseISO, getYear, getMonth } from 'date-fns'
 
 const BOUNCER_COLORS = {
   minecraft: { bg: 'bg-green-500', light: 'bg-green-100', text: 'text-green-700' },
@@ -11,25 +10,18 @@ const BOUNCER_COLORS = {
 }
 
 const MONTH_NAMES = [
-  'Siječanj', 'Veljača', 'Ožujak', 'Travanj', 'Svibanj', 'Lipanj',
-  'Srpanj', 'Kolovoz', 'Rujan', 'Listopad', 'Studeni', 'Prosinac'
+  'Sij', 'Velj', 'Ožu', 'Tra', 'Svi', 'Lip',
+  'Srp', 'Kol', 'Ruj', 'Lis', 'Stu', 'Pro'
 ]
 
 export default function Revenue() {
   const [reservations, setReservations] = useState([])
   const [expenses, setExpenses] = useState([])
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([
-      supabase.from('reservations').select('*'),
-      supabase.from('expenses').select('*'),
-    ]).then(([res, exp]) => {
-      setReservations(res.data || [])
-      setExpenses(exp.data || [])
-      setLoading(false)
-    })
+    setReservations(db.reservations.getAll())
+    setExpenses(db.expenses.getAll())
   }, [])
 
   const calcPrice = (r) => (r.price || 100) * (1 - (r.discount || 0) / 100)
@@ -43,7 +35,10 @@ export default function Revenue() {
     byModel[r.bouncer].revenue += calcPrice(r)
   })
 
-  // Monthly data for selected year
+  const totalRevenue = reservations.reduce((sum, r) => sum + calcPrice(r), 0)
+  const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0)
+
+  // Monthly data
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
     const monthRes = reservations.filter(r => {
       const d = parseISO(r.date)
@@ -55,26 +50,15 @@ export default function Revenue() {
       if (!byBouncer[r.bouncer]) byBouncer[r.bouncer] = 0
       byBouncer[r.bouncer] += calcPrice(r)
     })
-    const total = monthRes.reduce((sum, r) => sum + calcPrice(r), 0)
-    return { month: i, byBouncer, total, count: monthRes.length }
+    return { byBouncer, total: monthRes.reduce((sum, r) => sum + calcPrice(r), 0), count: monthRes.length }
   })
 
   const yearTotal = monthlyData.reduce((sum, m) => sum + m.total, 0)
-  const totalRevenue = reservations.reduce((sum, r) => sum + calcPrice(r), 0)
-  const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0)
   const maxMonthly = Math.max(...monthlyData.map(m => m.total), 1)
-
-  const years = [...new Set(reservations.map(r => getYear(parseISO(r.date))))]
-  if (!years.includes(selectedYear)) years.push(selectedYear)
-  years.sort()
-
-  if (loading) {
-    return <div className="space-y-4 animate-pulse">{[1,2,3].map(i => <div key={i} className="h-24 bg-gray-200 rounded-2xl" />)}</div>
-  }
 
   return (
     <div className="space-y-4">
-      {/* Summary */}
+      {/* Revenue by model */}
       <div className="bg-white rounded-2xl p-4">
         <h3 className="font-semibold text-brand-dark mb-3">Prihod po napuhancu</h3>
         <div className="space-y-3">
@@ -128,27 +112,26 @@ export default function Revenue() {
         </div>
       </div>
 
-      {/* Monthly Breakdown */}
+      {/* Monthly */}
       <div className="bg-white rounded-2xl p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-brand-dark">Po mjesecima</h3>
           <div className="flex items-center gap-2">
-            <button onClick={() => setSelectedYear(y => y - 1)} className="p-1 hover:bg-gray-100 rounded">
+            <button onClick={() => setSelectedYear(y => y - 1)} className="p-1 active:bg-gray-100 rounded">
               <ChevronLeft className="w-4 h-4 text-gray-500" />
             </button>
             <span className="text-sm font-medium text-brand-dark min-w-[48px] text-center">{selectedYear}</span>
-            <button onClick={() => setSelectedYear(y => y + 1)} className="p-1 hover:bg-gray-100 rounded">
+            <button onClick={() => setSelectedYear(y => y + 1)} className="p-1 active:bg-gray-100 rounded">
               <ChevronRight className="w-4 h-4 text-gray-500" />
             </button>
           </div>
         </div>
 
-        {/* Bar chart */}
         <div className="space-y-2">
           {monthlyData.map((m, i) => (
             <div key={i} className={`${m.total === 0 ? 'opacity-40' : ''}`}>
               <div className="flex items-center justify-between text-xs mb-0.5">
-                <span className="text-gray-500 w-16">{MONTH_NAMES[i].slice(0, 3)}</span>
+                <span className="text-gray-500 w-10">{MONTH_NAMES[i]}</span>
                 <span className="font-medium text-brand-dark">{m.total > 0 ? `${m.total.toLocaleString()}€` : '-'}</span>
               </div>
               <div className="flex h-4 bg-gray-50 rounded-full overflow-hidden">
@@ -160,7 +143,6 @@ export default function Revenue() {
                       key={b}
                       className={`${BOUNCER_COLORS[b].bg} transition-all duration-700 first:rounded-l-full last:rounded-r-full`}
                       style={{ width: `${w}%` }}
-                      title={`${b}: ${m.byBouncer[b]}€`}
                     />
                   )
                 })}
